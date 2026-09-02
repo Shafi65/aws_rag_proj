@@ -1,0 +1,42 @@
+services:
+  db:
+    # Official pgvector image: stock Postgres 17 with the extension compiled in.
+    # This is why we use Docker at all -- building pgvector from source on macOS
+    # means dealing with a C toolchain and the Postgres dev headers.
+    image: pgvector/pgvector:pg17
+    container_name: rag_pg
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: ragdb
+
+    # Host 5433 -> container 5432. Deliberately not 5432 on the host: if you
+    # ever install Postgres locally (Homebrew, Postgres.app) it grabs 5432 and
+    # the collision produces a confusing "connection refused" or, worse, a
+    # successful connection to the wrong database.
+    ports:
+      - "5433:5432"
+
+    volumes:
+      # Named volume, so data survives `docker compose down`.
+      # `docker compose down -v` deletes it -- that is the reset button.
+      - pgdata:/var/lib/postgresql/data
+
+      # Anything in this directory runs on FIRST initialisation only, i.e. when
+      # the pgdata volume is empty. Editing schema.sql later does nothing until
+      # you `docker compose down -v && docker compose up -d`.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+    # `docker compose up -d` returns as soon as the container starts, which is
+    # before Postgres is accepting connections. The healthcheck gives us a
+    # reliable "is it actually ready" signal instead of guessing with sleep.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d ragdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
