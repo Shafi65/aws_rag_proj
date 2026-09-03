@@ -134,9 +134,14 @@ python src/web.py        # http://127.0.0.1:8765
 ```
 
 Standard library `http.server` and one self-contained HTML file — **no new
-dependencies, and no CDN links**, so it works with no internet. It is a thin
-shell over the same functions the CLI uses; it adds no retrieval logic of its
-own, or the demo would be showing something other than the system.
+dependencies and no external assets**. The page pulls nothing from a CDN, so a
+network that blocks cdnjs or Google Fonts still renders it correctly. (The
+*queries* still need internet — all three model calls go to Bedrock. See
+[What runs where](#what-runs-where).)
+
+It is a thin shell over the same functions the CLI uses; it adds no retrieval
+logic of its own, or the demo would be showing something other than the
+system.
 
 It shows both retrieval stages side by side and labels what moved — including
 a **`rescued from #8`** badge on any chunk the reranker pulled in from outside
@@ -162,6 +167,28 @@ Any config value can be overridden for a single run without editing `.env`:
 ```bash
 GENERATION_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0 python src/answer.py "..."
 ```
+
+---
+
+## What runs where
+
+| Step | Where | Network |
+|---|---|---|
+| PDF extraction, chunking | Local Python | — |
+| Storage, vector search over 1,482 chunks | Postgres + pgvector, local Docker | — |
+| **Embedding** (ingest and query) | Bedrock, Titan Text Embeddings v2 | **required** |
+| **Reranking** (20 candidates) | Bedrock, Cohere Rerank 3.5 | **required** |
+| **Generation** | Bedrock, Converse API | **required** |
+
+Retrieval is local and fast — vector search over the whole corpus takes ~19ms.
+The three model calls are remote and dominate latency: on a typical query,
+`embed 310ms · search 30ms · rerank 593ms · generate 1390ms`.
+
+That split is the central tradeoff. Managed models mean no GPUs to run and a
+model swap is a config change; the cost is a hard network dependency and
+per-call latency. A fully offline variant would need local embedding and
+reranking models and a local LLM, trading operational simplicity for
+independence.
 
 ---
 
