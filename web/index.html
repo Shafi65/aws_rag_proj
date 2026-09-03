@@ -5,116 +5,221 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RAG over AWS Bedrock</title>
 <style>
+  /* Light and dark both supported, following the system by default with a
+     manual override. A demo often runs on a projector in a room you don't
+     control, and dark themes wash out badly under bright projection. */
   :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1d212a; --line:#282e3a;
-    --text:#e6e8ec; --muted:#8b93a7; --dim:#5d6577;
-    --teal:#4ec9b0; --green:#6cc24a; --amber:#e0a458; --red:#e06c75;
+    --bg:#fbfbfc; --panel:#fff; --sunk:#f4f5f7; --line:#e4e6ea; --line2:#eef0f3;
+    --text:#16181d; --muted:#5f6674; --faint:#949aa6;
+    --accent:#0d7d70; --accent-bg:#e6f4f2;
+    --warn:#a35b06;  --warn-bg:#fdf3e3;
+    --shadow:0 1px 2px rgba(16,20,28,.05), 0 4px 16px rgba(16,20,28,.05);
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
   }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d0f13; --panel:#14171d; --sunk:#191d24; --line:#252a34; --line2:#1f232b;
+      --text:#e9ebef; --muted:#98a0ae; --faint:#6b7280;
+      --accent:#5eead4; --accent-bg:#0e2a27;
+      --warn:#fbbf24;  --warn-bg:#2a2113;
+      --shadow:none;
+    }
+  }
+  :root[data-theme=light]{
+    --bg:#fbfbfc; --panel:#fff; --sunk:#f4f5f7; --line:#e4e6ea; --line2:#eef0f3;
+    --text:#16181d; --muted:#5f6674; --faint:#949aa6;
+    --accent:#0d7d70; --accent-bg:#e6f4f2; --warn:#a35b06; --warn-bg:#fdf3e3;
+    --shadow:0 1px 2px rgba(16,20,28,.05), 0 4px 16px rgba(16,20,28,.05);
+  }
+  :root[data-theme=dark]{
+    --bg:#0d0f13; --panel:#14171d; --sunk:#191d24; --line:#252a34; --line2:#1f232b;
+    --text:#e9ebef; --muted:#98a0ae; --faint:#6b7280;
+    --accent:#5eead4; --accent-bg:#0e2a27; --warn:#fbbf24; --warn-bg:#2a2113;
+    --shadow:none;
+  }
+
   *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
   body{
     margin:0; background:var(--bg); color:var(--text);
-    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    font:17px/1.6 var(--sans); -webkit-font-smoothing:antialiased;
   }
-  .wrap{max-width:1180px; margin:0 auto; padding:28px 24px 80px}
+  .wrap{max-width:940px; margin:0 auto; padding:32px 28px 96px}
 
-  header{display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:22px}
-  h1{font-size:20px; margin:0; font-weight:650; letter-spacing:-.01em}
-  .meta{color:var(--muted); font:12px/1.4 var(--mono); display:flex; gap:14px; flex-wrap:wrap}
-  .meta b{color:var(--teal); font-weight:600}
+  /* ---------- header ---------- */
+  header{display:flex; align-items:center; gap:16px; margin-bottom:30px}
+  h1{font-size:17px; font-weight:640; margin:0; letter-spacing:-.01em; white-space:nowrap}
+  .facts{
+    margin-left:auto; display:flex; gap:20px; flex-wrap:wrap; justify-content:flex-end;
+    font:12px/1.4 var(--mono); color:var(--faint);
+  }
+  .facts b{color:var(--muted); font-weight:600}
+  .theme{
+    background:none; border:1px solid var(--line); color:var(--faint);
+    border-radius:7px; width:30px; height:30px; cursor:pointer; font-size:13px;
+    display:grid; place-items:center; flex-shrink:0;
+  }
+  .theme:hover{color:var(--text); border-color:var(--muted)}
 
-  .ask{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px}
-  .row{display:flex; gap:10px}
+  /* ---------- ask ---------- */
+  .ask{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:8px; box-shadow:var(--shadow);
+  }
+  .field{display:flex; gap:8px; align-items:center}
   input[type=text]{
-    flex:1; background:var(--panel2); border:1px solid var(--line); border-radius:8px;
-    color:var(--text); padding:13px 15px; font-size:16px; outline:none;
+    flex:1; background:transparent; border:0; color:var(--text);
+    padding:14px 14px; font:17px var(--sans); outline:none; min-width:0;
   }
-  input[type=text]:focus{border-color:var(--teal)}
-  button.go{
-    background:var(--teal); color:#0c1117; border:0; border-radius:8px;
-    padding:0 22px; font-size:15px; font-weight:650; cursor:pointer;
+  input[type=text]::placeholder{color:var(--faint)}
+  .go{
+    background:var(--accent); color:var(--bg); border:0; border-radius:9px;
+    padding:11px 20px; font:15px/1 var(--sans); font-weight:640; cursor:pointer;
+    flex-shrink:0; transition:opacity .15s;
   }
-  button.go:disabled{opacity:.5; cursor:default}
+  .go:hover{opacity:.88}
+  .go:disabled{opacity:.4; cursor:default}
 
-  .controls{display:flex; align-items:center; gap:18px; margin-top:13px; flex-wrap:wrap}
-  .toggle{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
-          font-size:13px; color:var(--muted)}
-  .toggle input{accent-color:var(--teal); width:15px; height:15px; cursor:pointer}
-  .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:13px}
+  .beneath{
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:2px 8px 8px; margin-top:2px;
+  }
+  .switch{display:flex; align-items:center; gap:9px; cursor:pointer; user-select:none;
+          font-size:13.5px; color:var(--muted)}
+  .switch input{position:absolute; opacity:0; pointer-events:none}
+  .track{
+    width:34px; height:19px; border-radius:99px; background:var(--line);
+    position:relative; transition:background .18s; flex-shrink:0;
+  }
+  .track::after{
+    content:""; position:absolute; top:2px; left:2px; width:15px; height:15px;
+    border-radius:50%; background:var(--panel); box-shadow:0 1px 2px rgba(0,0,0,.2);
+    transition:transform .18s;
+  }
+  .switch input:checked + .track{background:var(--accent)}
+  .switch input:checked + .track::after{transform:translateX(15px)}
+  .kinfo{margin-left:auto; font:12px var(--mono); color:var(--faint)}
+
+  .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:14px}
   .chip{
-    background:var(--panel2); border:1px solid var(--line); color:var(--muted);
-    border-radius:999px; padding:5px 12px; font-size:12.5px; cursor:pointer;
+    background:var(--panel); border:1px solid var(--line); color:var(--muted);
+    border-radius:99px; padding:6px 14px; font:13px var(--sans); cursor:pointer;
+    transition:all .15s;
   }
-  .chip:hover{border-color:var(--teal); color:var(--text)}
-  .chip.neg{border-style:dashed}
+  .chip:hover{border-color:var(--accent); color:var(--text)}
+  .chip.neg{border-style:dashed; color:var(--faint)}
+  .chip.neg:hover{border-color:var(--warn); color:var(--text)}
 
-  .status{margin:22px 0; color:var(--muted); font:13px var(--mono)}
-  .status .dot{display:inline-block; width:7px; height:7px; border-radius:50%;
-               background:var(--teal); margin-right:8px; animation:pulse 1s infinite}
-  @keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+  /* ---------- pipeline / loading ---------- */
+  .pipe{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin:34px 0; font:12.5px var(--mono); color:var(--faint);
+  }
+  .pipe span{padding:5px 11px; border:1px solid var(--line); border-radius:99px; background:var(--panel)}
+  .pipe span.on{color:var(--accent); border-color:var(--accent); background:var(--accent-bg)}
+  .pipe i{font-style:normal; color:var(--line); font-size:14px}
+  .pipe.running span{animation:sweep 1.7s ease-in-out infinite}
+  .pipe.running span:nth-child(3){animation-delay:.16s}
+  .pipe.running span:nth-child(5){animation-delay:.32s}
+  .pipe.running span:nth-child(7){animation-delay:.48s}
+  @keyframes sweep{0%,60%,100%{opacity:.4}25%{opacity:1}}
 
-  section{margin-top:26px}
-  h2{font-size:11px; letter-spacing:.13em; text-transform:uppercase;
-     color:var(--dim); margin:0 0 11px; font-weight:650}
+  /* ---------- sections ---------- */
+  section{margin-top:40px}
+  h2{
+    font:11px/1 var(--sans); font-weight:680; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--faint); margin:0 0 14px;
+  }
 
   .answer{
-    background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--teal);
-    border-radius:10px; padding:20px 22px; font-size:16.5px; line-height:1.7; white-space:pre-wrap;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:26px 30px; font-size:18px; line-height:1.72; white-space:pre-wrap;
+    box-shadow:var(--shadow); letter-spacing:-.003em;
   }
-  .answer.refused{border-left-color:var(--amber)}
-  .cite{color:var(--teal); font-weight:650; font-family:var(--mono); font-size:.9em}
-  .refusal-tag{
-    display:inline-block; background:rgba(224,164,88,.14); color:var(--amber);
-    border:1px solid rgba(224,164,88,.35); border-radius:5px;
-    padding:2px 9px; font:11px/1.5 var(--mono); margin-bottom:11px;
+  .answer.refused{background:var(--warn-bg); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+  .tag{
+    display:inline-flex; align-items:center; gap:7px; background:var(--warn-bg);
+    color:var(--warn); border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
+    border-radius:99px; padding:4px 13px; font:11.5px/1.4 var(--mono);
+    letter-spacing:.04em; margin-bottom:12px;
   }
-
-  ol.sources{margin:11px 0 0; padding:0; list-style:none; counter-reset:s}
-  ol.sources li{
-    counter-increment:s; display:flex; gap:11px; align-items:baseline;
-    padding:7px 0; border-bottom:1px solid var(--line); font-size:14px;
-  }
-  ol.sources li:last-child{border-bottom:0}
-  ol.sources li::before{
-    content:"[" counter(s) "]"; color:var(--teal); font-family:var(--mono);
-    font-size:12.5px; min-width:30px;
+  .cite{
+    color:var(--accent); font-family:var(--mono); font-size:.82em; font-weight:650;
+    background:var(--accent-bg); padding:1px 5px; border-radius:4px; white-space:nowrap;
   }
 
-  .stages{display:grid; grid-template-columns:1fr 1fr; gap:16px}
-  @media(max-width:860px){.stages{grid-template-columns:1fr}}
-  .stage{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:15px}
-  .stage h3{margin:0 0 3px; font-size:13.5px; font-weight:650}
-  .stage .sub{color:var(--dim); font:11.5px/1.5 var(--mono); margin-bottom:12px}
+  ol.src{margin:16px 0 0; padding:0; list-style:none; counter-reset:s}
+  ol.src li{
+    counter-increment:s; display:flex; gap:14px; align-items:baseline;
+    padding:9px 4px; border-top:1px solid var(--line2); font-size:14.5px; color:var(--muted);
+  }
+  ol.src li::before{
+    content:"[" counter(s) "]"; color:var(--accent); font:12.5px var(--mono);
+    font-weight:650; min-width:26px;
+  }
 
-  .hit{display:flex; gap:11px; padding:9px 0; border-bottom:1px solid var(--line)}
-  .hit:last-child{border-bottom:0}
-  .hit .n{font:12px var(--mono); color:var(--dim); min-width:17px}
-  .hit .body{flex:1; min-width:0}
-  .hit .cit{font-size:12.5px; color:var(--text); font-weight:550}
-  .hit .txt{color:var(--muted); font-size:12px; margin-top:3px;
-            display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
-  .hit .sc{font:11.5px var(--mono); color:var(--dim); white-space:nowrap}
-  .hit.junk .cit{color:var(--red)}
+  /* ---------- retrieval flow ---------- */
+  .flow{display:grid; grid-template-columns:1fr auto 1fr; gap:0; align-items:stretch}
+  @media(max-width:820px){.flow{grid-template-columns:1fr; gap:14px}}
+  .col{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:18px 20px; box-shadow:var(--shadow); min-width:0;
+  }
+  .arrow{
+    display:grid; place-items:center; padding:0 16px; color:var(--line);
+    font-size:22px; user-select:none;
+  }
+  @media(max-width:820px){.arrow{padding:0; transform:rotate(90deg); height:20px}}
+  .col h3{margin:0 0 3px; font-size:14.5px; font-weight:650; letter-spacing:-.01em}
+  .col .sub{color:var(--faint); font:11.5px/1.5 var(--mono); margin-bottom:14px}
+
+  .hit{display:flex; gap:12px; padding:11px 0; border-top:1px solid var(--line2)}
+  .hit:first-of-type{border-top:0}
+  .hit .n{font:12.5px var(--mono); color:var(--faint); min-width:15px; padding-top:1px}
+  .hit .b{flex:1; min-width:0}
+  .hit .c{font-size:13px; font-weight:560; letter-spacing:-.005em; line-height:1.45}
+  .hit .t{
+    color:var(--muted); font-size:12.5px; margin-top:4px; line-height:1.5;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .hit .s{font:11.5px var(--mono); color:var(--faint); white-space:nowrap; padding-top:1px}
+  .hit.junk .c{color:var(--warn)}
+  .hit.junk .c::after{content:" · front matter"; font-weight:400; font-size:11px; opacity:.8}
 
   .badge{
-    display:inline-block; font:10.5px/1.5 var(--mono); border-radius:4px;
-    padding:1px 6px; margin-left:7px; vertical-align:1px;
+    display:inline-block; font:10.5px/1.6 var(--mono); border-radius:5px;
+    padding:0 6px; margin-left:7px; vertical-align:1.5px; font-weight:600;
   }
-  .badge.up{background:rgba(108,194,74,.14); color:var(--green)}
-  .badge.down{background:rgba(224,164,88,.14); color:var(--amber)}
-  .badge.rescued{background:rgba(78,201,176,.16); color:var(--teal); font-weight:650}
+  .badge.res{background:var(--accent-bg); color:var(--accent)}
+  .badge.up{background:var(--accent-bg); color:var(--accent); opacity:.75}
+  .badge.dn{background:var(--warn-bg); color:var(--warn)}
 
-  .timings{display:flex; gap:0; height:26px; border-radius:6px; overflow:hidden;
-           border:1px solid var(--line); margin-bottom:9px}
-  .timings div{display:flex; align-items:center; justify-content:center;
-               font:10.5px var(--mono); color:#0c1117; font-weight:650; overflow:hidden}
-  .tlegend{display:flex; gap:16px; flex-wrap:wrap; font:11.5px var(--mono); color:var(--muted)}
-  .tlegend i{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px}
+  .moved{
+    margin-top:16px; padding:13px 17px; background:var(--sunk);
+    border-radius:11px; font-size:13.5px; color:var(--muted); line-height:1.6;
+  }
+  .moved b{color:var(--accent); font-weight:640}
 
-  .note{color:var(--dim); font-size:12.5px; margin-top:10px; line-height:1.6}
-  .err{background:rgba(224,108,117,.1); border:1px solid rgba(224,108,117,.35);
-       color:var(--red); border-radius:8px; padding:14px; font:13px var(--mono)}
-  .hidden{display:none}
+  /* ---------- timings ---------- */
+  .bar{display:flex; height:32px; border-radius:9px; overflow:hidden; border:1px solid var(--line)}
+  .bar div{
+    display:grid; place-items:center; font:11px var(--mono); font-weight:650;
+    color:#fff; overflow:hidden; min-width:0;
+  }
+  .legend{
+    display:flex; gap:20px; flex-wrap:wrap; margin-top:11px;
+    font:12px var(--mono); color:var(--muted);
+  }
+  .legend i{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:7px}
+  .foot{color:var(--faint); font-size:13px; margin-top:14px; line-height:1.65}
+
+  .err{
+    background:var(--warn-bg); border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
+    color:var(--warn); border-radius:11px; padding:16px 18px; font:13px/1.6 var(--mono);
+    white-space:pre-wrap;
+  }
+  .hidden{display:none !important}
 </style>
 </head>
 <body>
@@ -122,109 +227,136 @@
 
   <header>
     <h1>RAG over AWS Bedrock</h1>
-    <div class="meta" id="meta"></div>
+    <div class="facts" id="facts"></div>
+    <button class="theme" id="theme" title="Toggle light / dark">◐</button>
   </header>
 
   <div class="ask">
-    <div class="row">
-      <input type="text" id="q" placeholder="Ask a question about the ingested documents…" autocomplete="off">
+    <div class="field">
+      <input type="text" id="q" placeholder="Ask a question about the ingested documents…" autocomplete="off" spellcheck="false">
       <button class="go" id="go">Ask</button>
     </div>
-    <div class="controls">
-      <label class="toggle"><input type="checkbox" id="rerank" checked> Two-stage retrieval (reranking)</label>
-      <span class="meta" id="ktxt"></span>
+    <div class="beneath">
+      <label class="switch">
+        <input type="checkbox" id="rerank" checked><span class="track"></span>
+        Two-stage retrieval
+      </label>
+      <span class="kinfo" id="kinfo"></span>
     </div>
-    <div class="chips" id="chips"></div>
+  </div>
+  <div class="chips" id="chips"></div>
+
+  <div class="pipe hidden" id="pipe">
+    <span>embed question</span><i>→</i>
+    <span>search <b id="nchunks"></b> chunks</span><i>→</i>
+    <span id="pr">rerank 20</span><i>→</i>
+    <span>generate</span>
   </div>
 
-  <div class="status hidden" id="status"><span class="dot"></span><span id="statustxt"></span></div>
   <div class="err hidden" id="err"></div>
 
-  <div id="results" class="hidden">
+  <div id="out" class="hidden">
     <section>
       <h2>Answer</h2>
-      <div id="refusaltag"></div>
+      <div id="tag"></div>
       <div class="answer" id="answer"></div>
-      <ol class="sources" id="sources"></ol>
+      <ol class="src" id="src"></ol>
     </section>
 
     <section>
-      <h2>Retrieval — what reached the prompt, and why</h2>
-      <div class="stages">
-        <div class="stage">
-          <h3>Stage 1 · vector search</h3>
-          <div class="sub" id="s1sub"></div>
-          <div id="s1"></div>
+      <h2>Retrieval — what reached the model</h2>
+      <div class="flow">
+        <div class="col">
+          <h3>Vector search</h3>
+          <div class="sub" id="sub1"></div>
+          <div id="c1"></div>
         </div>
-        <div class="stage">
-          <h3 id="s2title">Stage 2 · reranker</h3>
-          <div class="sub" id="s2sub"></div>
-          <div id="s2"></div>
+        <div class="arrow">→</div>
+        <div class="col">
+          <h3 id="h2t">Reranker</h3>
+          <div class="sub" id="sub2"></div>
+          <div id="c2"></div>
         </div>
       </div>
-      <div class="note" id="movenote"></div>
+      <div class="moved" id="moved"></div>
     </section>
 
     <section>
-      <h2>Where the time went</h2>
-      <div class="timings" id="timings"></div>
-      <div class="tlegend" id="tlegend"></div>
-      <div class="note" id="tokens"></div>
+      <h2>Latency</h2>
+      <div class="bar" id="bar"></div>
+      <div class="legend" id="legend"></div>
+      <div class="foot" id="foot"></div>
     </section>
   </div>
 </div>
 
 <script>
 const EXAMPLES = [
-  ["What is the AWS shared responsibility model?", false],
-  ["What is chaos engineering and what is it used for?", false],
-  ["What are the largest and smallest VPC CIDR block sizes?", false],
-  ["Which AWS service automates starting and stopping EC2 instances?", false],
-  ["What is the exact monthly price of an m5.large in us-east-1?", true],
-  ["Who won the 2022 FIFA World Cup?", true],
+  ["What is the AWS shared responsibility model?", 0],
+  ["What is chaos engineering and what is it used for?", 0],
+  ["What are the largest and smallest VPC CIDR block sizes?", 0],
+  ["Which AWS service automates starting and stopping EC2 instances?", 0],
+  ["What is the exact monthly price of an m5.large in us-east-1?", 1],
+  ["Who won the 2022 FIFA World Cup?", 1],
 ];
+const COLORS = {embed:'#0d7d70', search:'#3f7cac', rerank:'#a35b06', generate:'#6b5b95'};
 
 const $ = id => document.getElementById(id);
 const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const COLORS = {embed:'#4ec9b0', search:'#6cc24a', rerank:'#e0a458', generate:'#7aa2f7'};
-
-// Chunks that are mostly dot-leaders are table-of-contents noise. Flagging them
-// makes the reranker's effect obvious at a glance during a demo.
+// Chunks that are mostly dot leaders are tables of contents. Flagging them makes
+// the noise the reranker removes legible at a glance.
 const isJunk = t => (t.match(/\.\s?\.\s?\./g) || []).length > 3;
 
+// ---- theme ----
+const media = matchMedia('(prefers-color-scheme: dark)');
+let theme = localStorage.getItem('theme');
+const applyTheme = () => {
+  if (theme) document.documentElement.setAttribute('data-theme', theme);
+  else document.documentElement.removeAttribute('data-theme');
+};
+applyTheme();
+$('theme').onclick = () => {
+  const dark = theme ? theme === 'dark' : media.matches;
+  theme = dark ? 'light' : 'dark';
+  localStorage.setItem('theme', theme);
+  applyTheme();
+};
+
+// ---- example chips ----
 EXAMPLES.forEach(([text, negative]) => {
   const b = document.createElement('button');
   b.className = 'chip' + (negative ? ' neg' : '');
-  b.textContent = negative ? text.slice(0, 44) + '…' : text.slice(0, 46) + (text.length > 46 ? '…' : '');
-  b.title = text + (negative ? '  (not answerable from the corpus)' : '');
+  b.textContent = text.length > 44 ? text.slice(0, 43) + '…' : text;
+  b.title = text + (negative ? '   (not answerable from the corpus)' : '');
   b.onclick = () => { $('q').value = text; ask(); };
   $('chips').appendChild(b);
 });
 
 fetch('/api/config').then(r => r.json()).then(c => {
-  $('meta').innerHTML =
-    `<span><b>${c.corpus.chunks}</b> chunks / <b>${c.corpus.documents}</b> docs</span>` +
-    `<span>chunk <b>${c.chunk_size}</b>+<b>${c.chunk_overlap}</b> chars</span>` +
-    `<span>${esc(c.generation_model.split('.').slice(-1)[0])}</span>`;
-  $('ktxt').innerHTML = `${c.candidate_k} candidates &rarr; ${c.final_k} into the prompt`;
+  $('facts').innerHTML =
+    `<span><b>${c.corpus.chunks.toLocaleString()}</b> chunks · <b>${c.corpus.documents}</b> docs</span>` +
+    `<span>chunk <b>${c.chunk_size}</b>+<b>${c.chunk_overlap}</b></span>` +
+    `<span>${esc(c.generation_model.split('.').pop())}</span>`;
+  $('kinfo').innerHTML = `${c.candidate_k} candidates &rarr; ${c.final_k} into the prompt`;
+  $('nchunks').textContent = c.corpus.chunks.toLocaleString();
+  $('pr').textContent = `rerank ${c.candidate_k}`;
 });
 
-function hitRow(h, opts = {}) {
-  const junk = isJunk(h.preview) ? ' junk' : '';
+function row(h, showMove) {
   let badge = '';
-  if (opts.showMove && h.was_rank != null) {
-    if (h.was_rank > 5) badge = `<span class="badge rescued">rescued from #${h.was_rank}</span>`;
-    else if (h.was_rank > h.rank) badge = `<span class="badge up">&uarr; from #${h.was_rank}</span>`;
-    else if (h.was_rank < h.rank) badge = `<span class="badge down">&darr; from #${h.was_rank}</span>`;
+  if (showMove && h.was_rank != null) {
+    if (h.was_rank > 5) badge = `<span class="badge res">rescued from #${h.was_rank}</span>`;
+    else if (h.was_rank > h.rank) badge = `<span class="badge up">↑ #${h.was_rank}</span>`;
+    else if (h.was_rank < h.rank) badge = `<span class="badge dn">↓ #${h.was_rank}</span>`;
   }
   const score = h.score != null ? h.score.toFixed(3) : h.distance.toFixed(3);
-  return `<div class="hit${junk}">
+  return `<div class="hit${isJunk(h.preview) ? ' junk' : ''}">
     <div class="n">${h.rank}</div>
-    <div class="body">
-      <div class="cit">${esc(h.citation)}${badge}</div>
-      <div class="txt">${esc(h.preview.slice(0, 190))}</div>
+    <div class="b">
+      <div class="c">${esc(h.citation)}${badge}</div>
+      <div class="t">${esc(h.preview.slice(0, 180))}</div>
     </div>
-    <div class="sc">${score}</div>
+    <div class="s">${score}</div>
   </div>`;
 }
 
@@ -233,17 +365,15 @@ async function ask() {
   if (!question) return;
   const rerank = $('rerank').checked;
 
-  $('results').classList.add('hidden');
+  $('out').classList.add('hidden');
   $('err').classList.add('hidden');
-  $('status').classList.remove('hidden');
-  $('statustxt').textContent = 'embedding question → searching 1,482 chunks' +
-    (rerank ? ' → reranking → generating…' : ' → generating…');
+  $('pipe').classList.remove('hidden');
+  $('pipe').classList.add('running');
   $('go').disabled = true;
 
   try {
     const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question, rerank})
     });
     const d = await res.json();
@@ -252,52 +382,52 @@ async function ask() {
   } catch (e) {
     $('err').textContent = e.message;
     $('err').classList.remove('hidden');
+    $('pipe').classList.add('hidden');
   } finally {
-    $('status').classList.add('hidden');
+    $('pipe').classList.remove('running');
     $('go').disabled = false;
   }
 }
 
 function render(d) {
-  // Turn [1] into a highlighted span so citations are visually obvious.
-  $('answer').innerHTML = esc(d.answer).replace(/\[(\d+)\]/g, '<span class="cite">[$1]</span>');
+  $('answer').innerHTML = esc(d.answer).replace(/\[(\d+)\]/g, '<span class="cite">$1</span>');
   $('answer').className = 'answer' + (d.refused ? ' refused' : '');
-  $('refusaltag').innerHTML = d.refused
-    ? '<span class="refusal-tag">REFUSED — corpus does not support an answer</span>' : '';
+  $('tag').innerHTML = d.refused
+    ? '<span class="tag">✕ refused — corpus does not support an answer</span>' : '';
+  $('src').innerHTML = d.stage2.map(h => `<li>${esc(h.citation)}</li>`).join('');
 
-  $('sources').innerHTML = d.stage2.map(h => `<li>${esc(h.citation)}</li>`).join('');
-
-  $('s1sub').textContent = `cosine distance · lower is closer · top ${d.stage1_top.length} of ${d.stage1.length}`;
-  $('s1').innerHTML = d.stage1_top.map(h => hitRow(h)).join('');
+  $('sub1').textContent = `cosine distance · lower is closer · top ${d.stage1_top.length} of ${d.stage1.length}`;
+  $('c1').innerHTML = d.stage1_top.map(h => row(h, false)).join('');
 
   if (d.rerank) {
-    $('s2title').textContent = 'Stage 2 · cross-encoder reranker';
-    $('s2sub').textContent = 'relevance score · higher is better · query and chunk read together';
-    $('s2').innerHTML = d.stage2.map(h => hitRow(h, {showMove: true})).join('');
-    const promoted = d.stage2.filter(h => h.was_rank > 5).length;
+    $('h2t').textContent = 'Reranker';
+    $('sub2').textContent = 'relevance · higher is better · query + chunk read together';
+    $('c2').innerHTML = d.stage2.map(h => row(h, true)).join('');
+    const rescued = d.stage2.filter(h => h.was_rank > 5).length;
     const changed = d.stage2.filter(h => h.was_rank !== h.rank).length;
-    $('movenote').innerHTML = promoted
-      ? `<b style="color:var(--teal)">${promoted} chunk(s) rescued from outside the top 5</b> — stage one ranked them too low to reach the prompt. ${changed} of ${d.stage2.length} positions changed.`
-      : `${changed} of ${d.stage2.length} positions changed. Nothing was rescued from outside the cutoff on this question.`;
+    $('moved').innerHTML = rescued
+      ? `<b>${rescued} chunk${rescued > 1 ? 's' : ''} rescued from outside the top 5.</b> Vector search ranked ${rescued > 1 ? 'them' : 'it'} too low to reach the model — the reranker pulled ${rescued > 1 ? 'them' : 'it'} in. ${changed} of ${d.stage2.length} positions changed.`
+      : `${changed} of ${d.stage2.length} positions changed. Nothing was rescued from outside the cutoff this time — turn the toggle off and compare to see what stage one would have sent alone.`;
   } else {
-    $('s2title').textContent = 'Stage 2 · disabled';
-    $('s2sub').textContent = 'stage one results passed straight to the prompt';
-    $('s2').innerHTML = '<div class="note">Reranking is off. Turn it on to compare — the same question often changes what reaches the prompt.</div>';
-    $('movenote').textContent = '';
+    $('h2t').textContent = 'Reranker — off';
+    $('sub2').textContent = 'stage one results passed straight to the model';
+    $('c2').innerHTML = `<div class="foot" style="margin:0">Reranking is disabled. The chunks on the left are exactly what the model received.</div>`;
+    $('moved').innerHTML = 'Turn <b>two-stage retrieval</b> on and ask the same question — on most queries the set that reaches the model changes.';
   }
 
   const t = d.timings, total = t.embed + t.search + t.rerank + t.generate;
-  $('timings').innerHTML = Object.entries(t).filter(([, v]) => v > 0).map(([k, v]) =>
-    `<div style="width:${(v / total * 100).toFixed(1)}%;background:${COLORS[k]}">${v > total * .08 ? v + 'ms' : ''}</div>`
-  ).join('');
-  $('tlegend').innerHTML = Object.entries(t).filter(([, v]) => v > 0).map(([k, v]) =>
+  const parts = Object.entries(t).filter(([, v]) => v > 0);
+  $('bar').innerHTML = parts.map(([k, v]) =>
+    `<div style="flex:${v};background:${COLORS[k]}" title="${k} ${v}ms">${v / total > .12 ? v + 'ms' : ''}</div>`).join('');
+  $('legend').innerHTML = parts.map(([k, v]) =>
     `<span><i style="background:${COLORS[k]}"></i>${k} ${v}ms</span>`).join('') +
-    `<span style="color:var(--text)">total ${total}ms</span>`;
-  $('tokens').textContent =
-    `${d.usage.inputTokens} input tokens (the ${d.stage2.length} chunks plus the question), ` +
-    `${d.usage.outputTokens} output. Vector search over ${d.corpus.chunks} chunks took ${t.search}ms.`;
+    `<span style="color:var(--text);font-weight:600">total ${(total / 1000).toFixed(1)}s</span>`;
+  $('foot').textContent =
+    `Vector search over ${d.corpus.chunks.toLocaleString()} chunks took ${t.search}ms — a fraction of the total. ` +
+    `The model received ${d.usage.inputTokens} input tokens (${d.stage2.length} chunks plus the question) and produced ${d.usage.outputTokens}.`;
 
-  $('results').classList.remove('hidden');
+  $('pipe').classList.add('hidden');
+  $('out').classList.remove('hidden');
 }
 
 $('go').onclick = ask;
