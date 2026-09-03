@@ -171,7 +171,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    port = 8000
+    # Not 8000. That is the default for half the dev tooling in existence, and
+    # a collision here does not error -- http.server sets SO_REUSEADDR, so the
+    # bind succeeds and whichever process bound FIRST silently keeps receiving
+    # the connections. Same reasoning as Postgres on 5433 instead of 5432.
+    port = 8765
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
 

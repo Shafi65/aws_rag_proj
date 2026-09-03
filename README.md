@@ -112,7 +112,7 @@ aws s3 sync ./your-docs s3://your-bucket/
 python src/ingest.py                      # S3 -> chunks -> vectors -> Postgres
 
 python src/answer.py "your question here"     # CLI
-python src/web.py                             # or a browser UI at 127.0.0.1:8000
+python src/web.py                             # or a browser UI at 127.0.0.1:8765
 ```
 
 Useful variants:
@@ -130,7 +130,7 @@ python eval/run_eval.py --refusal         # also measure refusal rate
 ### Browser UI
 
 ```bash
-python src/web.py        # http://127.0.0.1:8000
+python src/web.py        # http://127.0.0.1:8765
 ```
 
 Standard library `http.server` and one self-contained HTML file — **no new
