@@ -18,6 +18,8 @@ precisely why it runs on 20 candidates rather than 1,482 chunks.
     costly + high precision (pick the winner)      ->  reranker, top 20 only
 """
 
+from dataclasses import replace
+
 import boto3
 from botocore.config import Config
 
@@ -76,12 +78,15 @@ def rerank(client, query: str, hits: list[db.Hit], top_n: int) -> list[db.Hit]:
     # not the documents themselves. We map back to our own Hit objects so the
     # citation metadata (filename, pages) survives the round trip. Losing that
     # mapping is the easiest way to end up citing the wrong page.
-    reranked = []
-    for result in response["results"]:
-        hit = hits[result["index"]]
-        hit.rerank_score = result["relevanceScore"]
-        reranked.append(hit)
-    return reranked
+    #
+    # replace() rather than assignment: the caller still holds the stage-one
+    # list, and those are the SAME objects. Setting rerank_score in place would
+    # retroactively change what stage one appears to have returned -- which is
+    # exactly the comparison this function exists to make possible.
+    return [
+        replace(hits[result["index"]], rerank_score=result["relevanceScore"])
+        for result in response["results"]
+    ]
 
 
 def retrieve(conn, bedrock_embed, question: str, use_rerank: bool) -> list[db.Hit]:

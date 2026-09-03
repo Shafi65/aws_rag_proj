@@ -1,12 +1,13 @@
 """A small web UI for demonstrating the pipeline.
 
-    python src/web.py            # http://127.0.0.1:8000
+    python src/web.py            # http://127.0.0.1:8765
     python src/web.py --port 9000
 
 Standard library only -- http.server, no Flask, no FastAPI, no Streamlit. The
 project's claim is three dependencies; a UI is not a good reason to add a
-fourth. The page is a single self-contained HTML file with no CDN links, so it
-also works with no internet, which matters when demoing on venue wifi.
+fourth. The page has no external assets, so a network that blocks CDNs still
+renders it -- note that queries still need internet, since embedding,
+reranking, and generation are all Bedrock calls.
 
 This is a thin shell over the same functions the CLI uses. It adds no retrieval
 logic of its own -- if it did, the demo would be showing something other than
@@ -33,6 +34,10 @@ PAGE = Path(__file__).resolve().parent.parent / "web" / "index.html"
 
 
 def _hit_to_dict(hit: db.Hit, rank: int) -> dict:
+    """Both scores are always reported. The UI decides which to show based on
+    the panel it is rendering, rather than inferring it from which field
+    happens to be set -- that inference is what let rerank scores leak into the
+    stage-one panel."""
     return {
         "rank": rank,
         "chunk_id": hit.chunk_id,

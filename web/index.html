@@ -342,14 +342,17 @@ fetch('/api/config').then(r => r.json()).then(c => {
   $('pr').textContent = `rerank ${c.candidate_k}`;
 });
 
-function row(h, showMove) {
+// isStage2 selects BOTH the badge and which score to display. Inferring the
+// score from "is rerank_score set" is what previously let rerank scores leak
+// into the stage-one panel.
+function row(h, isStage2) {
   let badge = '';
-  if (showMove && h.was_rank != null) {
+  if (isStage2 && h.was_rank != null) {
     if (h.was_rank > 5) badge = `<span class="badge res">rescued from #${h.was_rank}</span>`;
     else if (h.was_rank > h.rank) badge = `<span class="badge up">↑ #${h.was_rank}</span>`;
     else if (h.was_rank < h.rank) badge = `<span class="badge dn">↓ #${h.was_rank}</span>`;
   }
-  const score = h.score != null ? h.score.toFixed(3) : h.distance.toFixed(3);
+  const score = isStage2 ? (h.score != null ? h.score.toFixed(3) : '—') : h.distance.toFixed(3);
   return `<div class="hit${isJunk(h.preview) ? ' junk' : ''}">
     <div class="n">${h.rank}</div>
     <div class="b">
