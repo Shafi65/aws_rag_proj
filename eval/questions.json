@@ -1,0 +1,134 @@
+{
+  "_notes": [
+    "Ground truth is (file, page range), not chunk id. Chunk ids change every time",
+    "chunking parameters change, which would make the eval set useless for the exact",
+    "experiment it exists to run -- tuning chunk size. File and page survive re-chunking",
+    "and are verifiable by a human opening the PDF.",
+    "",
+    "A retrieved chunk counts as relevant when the filename matches AND its",
+    "[page_start, page_end] overlaps the expected range. Page ranges are given with a",
+    "little slack because a chunk that answers the question may begin on the previous",
+    "page.",
+    "",
+    "Every question below was written by reading the chunk first, so the answer is known",
+    "to be present in the corpus. Questions are phrased the way a user would ask them,",
+    "not by copying source wording -- otherwise this measures string overlap rather",
+    "than retrieval."
+  ],
+
+  "answerable": [
+    {
+      "id": "q01",
+      "question": "What is the difference between a data plane and a control plane in AWS services?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [19, 21]
+    },
+    {
+      "id": "q02",
+      "question": "What are the largest and smallest VPC CIDR block sizes I can use?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [53, 55]
+    },
+    {
+      "id": "q03",
+      "question": "Which AWS services can I use to store idempotency tokens?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [87, 89]
+    },
+    {
+      "id": "q04",
+      "question": "What is chaos engineering and what is it used for?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [152, 154]
+    },
+    {
+      "id": "q05",
+      "question": "Why does Amazon EMR launch all nodes of a cluster in the same Availability Zone?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [183, 185]
+    },
+    {
+      "id": "q06",
+      "question": "What happens during a game day and how should teams prepare for one?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [233, 236]
+    },
+    {
+      "id": "q07",
+      "question": "How often should disaster recovery failover be tested, and what should be documented?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [253, 255]
+    },
+    {
+      "id": "q08",
+      "question": "How should infrastructure as code templates be integrated into a deployment pipeline?",
+      "file": "wellarchitected-reliability-pillar.pdf",
+      "pages": [136, 139]
+    },
+    {
+      "id": "q09",
+      "question": "How can I reduce the time my team spends managing database instances?",
+      "file": "wellarchitected-cost-optimization-pillar.pdf",
+      "pages": [84, 86]
+    },
+    {
+      "id": "q10",
+      "question": "Which AWS service automates starting and stopping EC2 and RDS instances on a schedule?",
+      "file": "wellarchitected-cost-optimization-pillar.pdf",
+      "pages": [132, 134]
+    },
+    {
+      "id": "q11",
+      "question": "Which AWS services alert me when costs are higher than expected?",
+      "file": "wellarchitected-cost-optimization-pillar.pdf",
+      "pages": [66, 68]
+    },
+    {
+      "id": "q12",
+      "question": "How do I allocate costs to business units for containerized applications?",
+      "file": "wellarchitected-cost-optimization-pillar.pdf",
+      "pages": [99, 102]
+    },
+    {
+      "id": "q13",
+      "question": "What does AWS Control Tower provide for establishing security guardrails?",
+      "file": "wellarchitected-security-pillar.pdf",
+      "pages": [15, 17]
+    },
+    {
+      "id": "q14",
+      "question": "What are common anti-patterns when managing credentials and secrets?",
+      "file": "wellarchitected-security-pillar.pdf",
+      "pages": [47, 50]
+    },
+    {
+      "id": "q15",
+      "question": "What are session policies and how do they affect permissions?",
+      "file": "wellarchitected-security-pillar.pdf",
+      "pages": [63, 66]
+    }
+  ],
+
+  "unanswerable": [
+    {
+      "id": "u01",
+      "question": "What is the exact monthly price in USD of an m5.large EC2 instance in us-east-1?",
+      "why": "Plausibly in scope -- retrieval returns cost chunks -- but the corpus contains no prices."
+    },
+    {
+      "id": "u02",
+      "question": "Who won the 2022 FIFA World Cup?",
+      "why": "Entirely outside the corpus. The model knows this from pretraining; it must not use it."
+    },
+    {
+      "id": "u03",
+      "question": "What is the default maximum number of Lambda concurrent executions per account?",
+      "why": "A real AWS fact, adjacent to the corpus, but not stated in these three whitepapers."
+    },
+    {
+      "id": "u04",
+      "question": "Which AWS Region has the lowest carbon footprint according to these documents?",
+      "why": "Sustainability is a different Well-Architected pillar, not one of the three ingested."
+    }
+  ]
+}

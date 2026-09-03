@@ -4,6 +4,7 @@ __pycache__/
 
 # Working notes -- kept local, not published
 DECISIONS.md
+DEMO.md
 
 *.pyc
 .DS_Store

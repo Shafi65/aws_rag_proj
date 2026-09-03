@@ -171,6 +171,78 @@ reads the environment.
 
 ---
 
+## Evaluation
+
+Retrieval quality is the ceiling on answer quality — if the right chunk never
+reaches the prompt, no prompt engineering rescues the answer. So the harness
+measures retrieval directly rather than judging final answers: fewer moving
+parts, deterministic, and no LLM-as-judge to validate first.
+
+Ground truth is **(file, page range)**, not chunk ID. Chunk IDs change whenever
+chunking parameters change, which would invalidate the eval set for the exact
+experiment it exists to support. File and page survive re-chunking and a human
+can check them by opening the PDF.
+
+```
+$ python eval/run_eval.py --verbose
+
+Retrieval evaluation -- 15 questions with known source pages
+candidates=20  final_k=5  chunk=1200/200
+
+  STAGE ONE (vector search)
+    recall@20         15/15   1.00   <- ceiling for everything below
+
+  TOP 5 INTO THE PROMPT      before rerank -> after rerank
+    hit-rate@5          0.93  ->  1.00    (14/15 -> 15/15)
+    MRR@5               0.856 ->  0.917
+
+Refusal evaluation -- 4 questions the corpus cannot answer
+    refusal rate      4/4   1.00
+```
+
+| Metric | Value | What it means |
+|---|---|---|
+| `recall@20` | **1.00** | Stage one put a relevant chunk in the candidate pool for every question. This is the hard ceiling on everything downstream — reranking only reorders what it is given. |
+| `hit-rate@5` | **0.93 → 1.00** | Reranking got a relevant chunk into the prompt for the one question where stage one had failed to. |
+| `MRR@5` | **0.856 → 0.917** | Relevant chunks moved closer to position 1. Hit-rate treats rank 1 and rank 5 as equal; MRR doesn't, and position matters because models attend unevenly across a long context. |
+| refusal rate | **1.00** | All four unanswerable questions declined, including two that are plausibly in-domain. |
+
+**The concrete rerank win** is question 4 ("what is chaos engineering used
+for?"). Stage one ranked the relevant chunk **6th** — just outside the cutoff,
+so it never reached the prompt. Reranking pulled it to **4th**. Questions 12 and
+13 also improved (3→1 and 2→1).
+
+**And one regression:** question 11 went from rank 1 to rank 2. Reranking is not
+uniformly better, it is better on average. Reporting the average without the
+regression would be dishonest.
+
+### Reading these numbers honestly
+
+- **15 questions is a small sample.** `recall@20 = 1.00` should be read as "no
+  failures observed in 15 trials", not "recall is 100%". The confidence interval
+  is wide.
+- **The questions were written by reading the source chunks first**, so they are
+  answerable by construction. That measures retrieval, not corpus coverage.
+  They are phrased as a user would ask rather than by copying source wording —
+  otherwise this would measure string overlap.
+- **Perfect stage-one recall means reranking has limited headroom here.** The
+  gains are real but modest precisely *because* stage one is already doing well
+  on a 1,482-chunk corpus of one document family. On a larger, noisier corpus
+  the gap would widen — which is a hypothesis this harness could test rather
+  than a claim to assert.
+
+### What this harness unlocks
+
+Chunk size, overlap, `CANDIDATE_K`, and `FINAL_K` are all config values. With
+this in place, changing them becomes an experiment with a number attached
+instead of an argument:
+
+```bash
+CHUNK_SIZE_CHARS=600 python src/ingest.py --force && python eval/run_eval.py
+```
+
+---
+
 ## Failure modes and limitations
 
 Known and unfixed, listed deliberately.
@@ -184,7 +256,7 @@ Known and unfixed, listed deliberately.
 | **Fixed chunk size regardless of document structure.** | A 1,200-character window may split a table or a procedure. | Structure-aware chunking (split on headings) is the next improvement. |
 | **The vector index may not be used at this scale.** With ~1,500 rows the planner may prefer a sequential scan — and be right. | None at demo scale. | Verify with `EXPLAIN ANALYZE`; the index earns its keep at 10⁵+ rows. |
 | **Single-tenant, no access control.** Any question can retrieve any chunk. | Fine for a demo corpus of public documents. | Row-level security keyed to the caller's identity, filtered in the same query. |
-| **Retrieval quality is not yet measured.** | Improvements are argued, not proven. | An eval harness (recall@k, MRR before/after rerank) is the highest-value next addition. |
+| **Eval set is 15 questions on one document family.** | Metrics have wide confidence intervals and may not generalise to a noisier corpus. | More questions, and a second unrelated corpus, would be the next step. |
 
 ---
 
@@ -200,7 +272,7 @@ Known and unfixed, listed deliberately.
 | **Interface** | CLI | API Gateway + Lambda, or ECS Fargate; the retrieval code is unchanged |
 | **Observability** | `print()` | Structured logs to CloudWatch; per-query metrics for retrieval latency, rerank latency, token spend, and refusal rate |
 | **Cost control** | None | Budget alarms; cache embeddings for repeated queries; consider `EMBEDDING_DIM=512` at scale (half the storage and index size) |
-| **Evaluation** | Manual spot checks | The eval harness in CI, gating changes to chunk size, `k`, or prompts on measured recall@k and MRR rather than intuition |
+| **Evaluation** | 15-question harness, run by hand | The same harness in CI, gating changes to chunk size, `k`, or prompts on measured recall@k and MRR; expanded question set; regression alerts on refusal rate |
 | **Data residency** | `us.` inference profile (US-only routing) | Explicit per-tenant region policy; the `global.` profiles route worldwide and would be a compliance problem for regulated data |
 | **Multi-tenancy** | None | A `tenant_id` column on both tables, row-level security, and the filter pushed into the vector query so tenants never share a candidate pool |
 
@@ -226,6 +298,10 @@ src/
   search.py            retrieval CLI, with --compare for before/after reranking
   rerank.py            stage two, cross-encoder
   answer.py            the full pipeline: retrieve -> prompt -> cited answer
+
+eval/
+  questions.json       15 answerable questions with known source pages, 4 unanswerable
+  run_eval.py          recall@k, hit-rate@k, MRR before/after rerank, refusal rate
 ```
 
 Corpus used for development: three AWS Well-Architected Framework pillar
