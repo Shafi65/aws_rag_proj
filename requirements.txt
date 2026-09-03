@@ -1,0 +1,5 @@
+# Pinned so the demo behaves the same tomorrow as it does today.
+# Three dependencies, total. No RAG framework.
+boto3==1.43.86          # AWS SDK: S3, Bedrock
+pypdf==6.16.2           # PDF text extraction, page by page
+psycopg[binary]==3.3.5  # Postgres driver; [binary] = prebuilt wheel, no compiler needed
