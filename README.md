@@ -145,6 +145,18 @@ asserted. It also breaks down latency per stage (embed / search / rerank /
 generate) and prints the token count for each answer, because cost per query
 should be visible rather than estimated.
 
+There is a `Makefile` for the common paths, so none of these need the venv
+activated first:
+
+```bash
+make up                      # start Postgres and wait until it is really ready
+make ingest                  # S3 -> chunks -> vectors -> Postgres
+make web                     # browser UI at 127.0.0.1:8765
+make ask q="your question"
+make eval                    # retrieval metrics + refusal rate
+make psql                    # SQL prompt against the corpus
+```
+
 Any config value can be overridden for a single run without editing `.env`:
 
 ```bash
@@ -302,6 +314,7 @@ Known and unfixed, listed deliberately.
 ## Repository layout
 
 ```
+Makefile               shortcuts: make up / web / ask / eval / psql
 docker-compose.yml     Postgres 17 + pgvector; schema applied on first boot
 schema.sql             documents + chunks tables, HNSW cosine index
 requirements.txt       three dependencies
