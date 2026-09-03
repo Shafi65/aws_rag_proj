@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG over AWS Bedrock</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212a; --line:#282e3a;
+    --text:#e6e8ec; --muted:#8b93a7; --dim:#5d6577;
+    --teal:#4ec9b0; --green:#6cc24a; --amber:#e0a458; --red:#e06c75;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 24px 80px}
+
+  header{display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:22px}
+  h1{font-size:20px; margin:0; font-weight:650; letter-spacing:-.01em}
+  .meta{color:var(--muted); font:12px/1.4 var(--mono); display:flex; gap:14px; flex-wrap:wrap}
+  .meta b{color:var(--teal); font-weight:600}
+
+  .ask{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px}
+  .row{display:flex; gap:10px}
+  input[type=text]{
+    flex:1; background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    color:var(--text); padding:13px 15px; font-size:16px; outline:none;
+  }
+  input[type=text]:focus{border-color:var(--teal)}
+  button.go{
+    background:var(--teal); color:#0c1117; border:0; border-radius:8px;
+    padding:0 22px; font-size:15px; font-weight:650; cursor:pointer;
+  }
+  button.go:disabled{opacity:.5; cursor:default}
+
+  .controls{display:flex; align-items:center; gap:18px; margin-top:13px; flex-wrap:wrap}
+  .toggle{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
+          font-size:13px; color:var(--muted)}
+  .toggle input{accent-color:var(--teal); width:15px; height:15px; cursor:pointer}
+  .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:13px}
+  .chip{
+    background:var(--panel2); border:1px solid var(--line); color:var(--muted);
+    border-radius:999px; padding:5px 12px; font-size:12.5px; cursor:pointer;
+  }
+  .chip:hover{border-color:var(--teal); color:var(--text)}
+  .chip.neg{border-style:dashed}
+
+  .status{margin:22px 0; color:var(--muted); font:13px var(--mono)}
+  .status .dot{display:inline-block; width:7px; height:7px; border-radius:50%;
+               background:var(--teal); margin-right:8px; animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+
+  section{margin-top:26px}
+  h2{font-size:11px; letter-spacing:.13em; text-transform:uppercase;
+     color:var(--dim); margin:0 0 11px; font-weight:650}
+
+  .answer{
+    background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--teal);
+    border-radius:10px; padding:20px 22px; font-size:16.5px; line-height:1.7; white-space:pre-wrap;
+  }
+  .answer.refused{border-left-color:var(--amber)}
+  .cite{color:var(--teal); font-weight:650; font-family:var(--mono); font-size:.9em}
+  .refusal-tag{
+    display:inline-block; background:rgba(224,164,88,.14); color:var(--amber);
+    border:1px solid rgba(224,164,88,.35); border-radius:5px;
+    padding:2px 9px; font:11px/1.5 var(--mono); margin-bottom:11px;
+  }
+
+  ol.sources{margin:11px 0 0; padding:0; list-style:none; counter-reset:s}
+  ol.sources li{
+    counter-increment:s; display:flex; gap:11px; align-items:baseline;
+    padding:7px 0; border-bottom:1px solid var(--line); font-size:14px;
+  }
+  ol.sources li:last-child{border-bottom:0}
+  ol.sources li::before{
+    content:"[" counter(s) "]"; color:var(--teal); font-family:var(--mono);
+    font-size:12.5px; min-width:30px;
+  }
+
+  .stages{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media(max-width:860px){.stages{grid-template-columns:1fr}}
+  .stage{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:15px}
+  .stage h3{margin:0 0 3px; font-size:13.5px; font-weight:650}
+  .stage .sub{color:var(--dim); font:11.5px/1.5 var(--mono); margin-bottom:12px}
+
+  .hit{display:flex; gap:11px; padding:9px 0; border-bottom:1px solid var(--line)}
+  .hit:last-child{border-bottom:0}
+  .hit .n{font:12px var(--mono); color:var(--dim); min-width:17px}
+  .hit .body{flex:1; min-width:0}
+  .hit .cit{font-size:12.5px; color:var(--text); font-weight:550}
+  .hit .txt{color:var(--muted); font-size:12px; margin-top:3px;
+            display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  .hit .sc{font:11.5px var(--mono); color:var(--dim); white-space:nowrap}
+  .hit.junk .cit{color:var(--red)}
+
+  .badge{
+    display:inline-block; font:10.5px/1.5 var(--mono); border-radius:4px;
+    padding:1px 6px; margin-left:7px; vertical-align:1px;
+  }
+  .badge.up{background:rgba(108,194,74,.14); color:var(--green)}
+  .badge.down{background:rgba(224,164,88,.14); color:var(--amber)}
+  .badge.rescued{background:rgba(78,201,176,.16); color:var(--teal); font-weight:650}
+
+  .timings{display:flex; gap:0; height:26px; border-radius:6px; overflow:hidden;
+           border:1px solid var(--line); margin-bottom:9px}
+  .timings div{display:flex; align-items:center; justify-content:center;
+               font:10.5px var(--mono); color:#0c1117; font-weight:650; overflow:hidden}
+  .tlegend{display:flex; gap:16px; flex-wrap:wrap; font:11.5px var(--mono); color:var(--muted)}
+  .tlegend i{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px}
+
+  .note{color:var(--dim); font-size:12.5px; margin-top:10px; line-height:1.6}
+  .err{background:rgba(224,108,117,.1); border:1px solid rgba(224,108,117,.35);
+       color:var(--red); border-radius:8px; padding:14px; font:13px var(--mono)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>RAG over AWS Bedrock</h1>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="ask">
+    <div class="row">
+      <input type="text" id="q" placeholder="Ask a question about the ingested documents…" autocomplete="off">
+      <button class="go" id="go">Ask</button>
+    </div>
+    <div class="controls">
+      <label class="toggle"><input type="checkbox" id="rerank" checked> Two-stage retrieval (reranking)</label>
+      <span class="meta" id="ktxt"></span>
+    </div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="status hidden" id="status"><span class="dot"></span><span id="statustxt"></span></div>
+  <div class="err hidden" id="err"></div>
+
+  <div id="results" class="hidden">
+    <section>
+      <h2>Answer</h2>
+      <div id="refusaltag"></div>
+      <div class="answer" id="answer"></div>
+      <ol class="sources" id="sources"></ol>
+    </section>
+
+    <section>
+      <h2>Retrieval — what reached the prompt, and why</h2>
+      <div class="stages">
+        <div class="stage">
+          <h3>Stage 1 · vector search</h3>
+          <div class="sub" id="s1sub"></div>
+          <div id="s1"></div>
+        </div>
+        <div class="stage">
+          <h3 id="s2title">Stage 2 · reranker</h3>
+          <div class="sub" id="s2sub"></div>
+          <div id="s2"></div>
+        </div>
+      </div>
+      <div class="note" id="movenote"></div>
+    </section>
+
+    <section>
+      <h2>Where the time went</h2>
+      <div class="timings" id="timings"></div>
+      <div class="tlegend" id="tlegend"></div>
+      <div class="note" id="tokens"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const EXAMPLES = [
+  ["What is the AWS shared responsibility model?", false],
+  ["What is chaos engineering and what is it used for?", false],
+  ["What are the largest and smallest VPC CIDR block sizes?", false],
+  ["Which AWS service automates starting and stopping EC2 instances?", false],
+  ["What is the exact monthly price of an m5.large in us-east-1?", true],
+  ["Who won the 2022 FIFA World Cup?", true],
+];
+
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const COLORS = {embed:'#4ec9b0', search:'#6cc24a', rerank:'#e0a458', generate:'#7aa2f7'};
+
+// Chunks that are mostly dot-leaders are table-of-contents noise. Flagging them
+// makes the reranker's effect obvious at a glance during a demo.
+const isJunk = t => (t.match(/\.\s?\.\s?\./g) || []).length > 3;
+
+EXAMPLES.forEach(([text, negative]) => {
+  const b = document.createElement('button');
+  b.className = 'chip' + (negative ? ' neg' : '');
+  b.textContent = negative ? text.slice(0, 44) + '…' : text.slice(0, 46) + (text.length > 46 ? '…' : '');
+  b.title = text + (negative ? '  (not answerable from the corpus)' : '');
+  b.onclick = () => { $('q').value = text; ask(); };
+  $('chips').appendChild(b);
+});
+
+fetch('/api/config').then(r => r.json()).then(c => {
+  $('meta').innerHTML =
+    `<span><b>${c.corpus.chunks}</b> chunks / <b>${c.corpus.documents}</b> docs</span>` +
+    `<span>chunk <b>${c.chunk_size}</b>+<b>${c.chunk_overlap}</b> chars</span>` +
+    `<span>${esc(c.generation_model.split('.').slice(-1)[0])}</span>`;
+  $('ktxt').innerHTML = `${c.candidate_k} candidates &rarr; ${c.final_k} into the prompt`;
+});
+
+function hitRow(h, opts = {}) {
+  const junk = isJunk(h.preview) ? ' junk' : '';
+  let badge = '';
+  if (opts.showMove && h.was_rank != null) {
+    if (h.was_rank > 5) badge = `<span class="badge rescued">rescued from #${h.was_rank}</span>`;
+    else if (h.was_rank > h.rank) badge = `<span class="badge up">&uarr; from #${h.was_rank}</span>`;
+    else if (h.was_rank < h.rank) badge = `<span class="badge down">&darr; from #${h.was_rank}</span>`;
+  }
+  const score = h.score != null ? h.score.toFixed(3) : h.distance.toFixed(3);
+  return `<div class="hit${junk}">
+    <div class="n">${h.rank}</div>
+    <div class="body">
+      <div class="cit">${esc(h.citation)}${badge}</div>
+      <div class="txt">${esc(h.preview.slice(0, 190))}</div>
+    </div>
+    <div class="sc">${score}</div>
+  </div>`;
+}
+
+async function ask() {
+  const question = $('q').value.trim();
+  if (!question) return;
+  const rerank = $('rerank').checked;
+
+  $('results').classList.add('hidden');
+  $('err').classList.add('hidden');
+  $('status').classList.remove('hidden');
+  $('statustxt').textContent = 'embedding question → searching 1,482 chunks' +
+    (rerank ? ' → reranking → generating…' : ' → generating…');
+  $('go').disabled = true;
+
+  try {
+    const res = await fetch('/api/ask', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question, rerank})
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    render(d);
+  } catch (e) {
+    $('err').textContent = e.message;
+    $('err').classList.remove('hidden');
+  } finally {
+    $('status').classList.add('hidden');
+    $('go').disabled = false;
+  }
+}
+
+function render(d) {
+  // Turn [1] into a highlighted span so citations are visually obvious.
+  $('answer').innerHTML = esc(d.answer).replace(/\[(\d+)\]/g, '<span class="cite">[$1]</span>');
+  $('answer').className = 'answer' + (d.refused ? ' refused' : '');
+  $('refusaltag').innerHTML = d.refused
+    ? '<span class="refusal-tag">REFUSED — corpus does not support an answer</span>' : '';
+
+  $('sources').innerHTML = d.stage2.map(h => `<li>${esc(h.citation)}</li>`).join('');
+
+  $('s1sub').textContent = `cosine distance · lower is closer · top ${d.stage1_top.length} of ${d.stage1.length}`;
+  $('s1').innerHTML = d.stage1_top.map(h => hitRow(h)).join('');
+
+  if (d.rerank) {
+    $('s2title').textContent = 'Stage 2 · cross-encoder reranker';
+    $('s2sub').textContent = 'relevance score · higher is better · query and chunk read together';
+    $('s2').innerHTML = d.stage2.map(h => hitRow(h, {showMove: true})).join('');
+    const promoted = d.stage2.filter(h => h.was_rank > 5).length;
+    const changed = d.stage2.filter(h => h.was_rank !== h.rank).length;
+    $('movenote').innerHTML = promoted
+      ? `<b style="color:var(--teal)">${promoted} chunk(s) rescued from outside the top 5</b> — stage one ranked them too low to reach the prompt. ${changed} of ${d.stage2.length} positions changed.`
+      : `${changed} of ${d.stage2.length} positions changed. Nothing was rescued from outside the cutoff on this question.`;
+  } else {
+    $('s2title').textContent = 'Stage 2 · disabled';
+    $('s2sub').textContent = 'stage one results passed straight to the prompt';
+    $('s2').innerHTML = '<div class="note">Reranking is off. Turn it on to compare — the same question often changes what reaches the prompt.</div>';
+    $('movenote').textContent = '';
+  }
+
+  const t = d.timings, total = t.embed + t.search + t.rerank + t.generate;
+  $('timings').innerHTML = Object.entries(t).filter(([, v]) => v > 0).map(([k, v]) =>
+    `<div style="width:${(v / total * 100).toFixed(1)}%;background:${COLORS[k]}">${v > total * .08 ? v + 'ms' : ''}</div>`
+  ).join('');
+  $('tlegend').innerHTML = Object.entries(t).filter(([, v]) => v > 0).map(([k, v]) =>
+    `<span><i style="background:${COLORS[k]}"></i>${k} ${v}ms</span>`).join('') +
+    `<span style="color:var(--text)">total ${total}ms</span>`;
+  $('tokens').textContent =
+    `${d.usage.inputTokens} input tokens (the ${d.stage2.length} chunks plus the question), ` +
+    `${d.usage.outputTokens} output. Vector search over ${d.corpus.chunks} chunks took ${t.search}ms.`;
+
+  $('results').classList.remove('hidden');
+}
+
+$('go').onclick = ask;
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
+$('q').focus();
+</script>
+</body>
+</html>

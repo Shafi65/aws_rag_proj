@@ -111,7 +111,8 @@ python src/check_bedrock.py               # verify AWS before building on it
 aws s3 sync ./your-docs s3://your-bucket/
 python src/ingest.py                      # S3 -> chunks -> vectors -> Postgres
 
-python src/answer.py "your question here"
+python src/answer.py "your question here"     # CLI
+python src/web.py                             # or a browser UI at 127.0.0.1:8000
 ```
 
 Useful variants:
@@ -122,7 +123,27 @@ python src/answer.py --no-rerank "..."    # generation without stage two
 python src/answer.py --show-context "..." # print exactly what the model was given
 python src/chunk.py path/to.pdf           # preview chunking, no AWS or DB needed
 python src/ingest.py --force              # re-ingest even if content hash matches
+python eval/run_eval.py --verbose         # retrieval metrics, per question
+python eval/run_eval.py --refusal         # also measure refusal rate
 ```
+
+### Browser UI
+
+```bash
+python src/web.py        # http://127.0.0.1:8000
+```
+
+Standard library `http.server` and one self-contained HTML file — **no new
+dependencies, and no CDN links**, so it works with no internet. It is a thin
+shell over the same functions the CLI uses; it adds no retrieval logic of its
+own, or the demo would be showing something other than the system.
+
+It shows both retrieval stages side by side and labels what moved — including
+a **`rescued from #8`** badge on any chunk the reranker pulled in from outside
+the stage-one cutoff, which is the reranker's effect made literal rather than
+asserted. It also breaks down latency per stage (embed / search / rerank /
+generate) and prints the token count for each answer, because cost per query
+should be visible rather than estimated.
 
 Any config value can be overridden for a single run without editing `.env`:
 
@@ -269,7 +290,7 @@ Known and unfixed, listed deliberately.
 | **Ingestion trigger** | Run `ingest.py` by hand | S3 `ObjectCreated` event → Lambda (or Step Functions for large documents) — documents become searchable on upload |
 | **Ingestion scale** | Sequential per document, in-process | SQS queue with per-document workers; DLQ for failures; idempotent via the existing content hash |
 | **Large documents** | Whole PDF loaded into memory | Stream to `/tmp` or process page-ranges; Step Functions Map for parallelism |
-| **Interface** | CLI | API Gateway + Lambda, or ECS Fargate; the retrieval code is unchanged |
+| **Interface** | CLI + a local stdlib HTTP server bound to loopback, no auth | API Gateway + Lambda or ECS Fargate behind Cognito; the retrieval code is unchanged, only the transport |
 | **Observability** | `print()` | Structured logs to CloudWatch; per-query metrics for retrieval latency, rerank latency, token spend, and refusal rate |
 | **Cost control** | None | Budget alarms; cache embeddings for repeated queries; consider `EMBEDDING_DIM=512` at scale (half the storage and index size) |
 | **Evaluation** | 15-question harness, run by hand | The same harness in CI, gating changes to chunk size, `k`, or prompts on measured recall@k and MRR; expanded question set; regression alerts on refusal rate |
@@ -298,6 +319,10 @@ src/
   search.py            retrieval CLI, with --compare for before/after reranking
   rerank.py            stage two, cross-encoder
   answer.py            the full pipeline: retrieve -> prompt -> cited answer
+  web.py               stdlib http.server wrapping the same functions
+
+web/
+  index.html           self-contained UI: both stages side by side, no CDN
 
 eval/
   questions.json       15 answerable questions with known source pages, 4 unanswerable
