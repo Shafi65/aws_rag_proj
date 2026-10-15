@@ -6,6 +6,12 @@ __pycache__/
 DECISIONS.md
 DEMO.md
 CHEATSHEET.md
+CHEATSHEET-IR.md
+RUNSHEET-IR.md
+
+# Local copies of the source PDFs -- they live in S3, and they are AWS's to
+# distribute. Kept here only for opening during a demo.
+docs/
 
 *.pyc
 .DS_Store
