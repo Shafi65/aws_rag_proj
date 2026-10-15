@@ -6,7 +6,7 @@ cited to file and page — and an explicit refusal when the documents don't supp
 Two-stage retrieval over Postgres + pgvector, with AWS Bedrock for embeddings,
 reranking, and generation. Plain Python, three dependencies, no RAG framework.
 
-**3 documents · 669 pages · 1,482 chunks · recall@20 1.00 · hit-rate@5 0.93 → 1.00 with reranking · refuses 4/4 unanswerable questions**
+**3 documents · 669 pages · 1,318 chunks · recall@20 1.00 · hit-rate@5 0.87 → 0.93 with reranking · refuses 4/4 unanswerable questions**
 
 ---
 
@@ -42,19 +42,20 @@ S3 → pypdf extract → chunk (1,200 chars, 200 overlap) → Titan embed → Po
 Pages are joined into one string before chunking so sentences survive page breaks;
 per-page character offsets are recorded separately, which is what lets a chunk be
 cited as `pp. 223-224`. Text, page range, and a 1,024-dimension vector land in a
-single row.
+single row. Both ends of every chunk snap to a paragraph or sentence break, so no
+chunk starts mid-sentence.
 
 **Query** runs two retrieval stages:
 
 ```
-question → Titan embed → cosine search over 1,482 chunks (HNSW) → 20 candidates
+question → Titan embed → cosine search over 1,318 chunks (HNSW) → 20 candidates
         → Cohere rerank → 5 chunks → Nova Lite → cited answer or refusal
 ```
 
 Stage one is a bi-encoder: chunk vectors are precomputed, so scanning the whole
 corpus is cheap. Stage two is a cross-encoder: it reads the query and each candidate
 together, which is far more accurate and cannot be precomputed — hence 20 candidates,
-not 1,482.
+not 1,318.
 
 | Layer | Choice |
 |---|---|
@@ -85,14 +86,15 @@ which would invalidate the eval set for the experiment it exists to support.
 | Metric | Value | |
 |---|---|---|
 | `recall@20` | **1.00** | stage one found the answer every time — the ceiling on everything below |
-| `hit-rate@5` | **0.93 → 1.00** | reranking got the last one into the prompt |
-| `MRR@5` | **0.856 → 0.917** | relevant chunks moved closer to rank 1 |
+| `hit-rate@5` | **0.87 → 0.93** | reranking got one more into the prompt |
+| `MRR@5` | **0.822 → 0.889** | relevant chunks moved closer to rank 1 |
 | refusal rate | **1.00** (4/4) | including two questions that look in-domain |
 
-On *"what is chaos engineering"*, stage one ranked the relevant chunk **6th** — outside
-the top 5, so it never reached the model. Reranking moved it to 4th.
+On *"how can I reduce the time my team spends managing databases"*, stage one ranked
+the relevant chunk **7th** — outside the top 5, so it never reached the model.
+Reranking moved it to 1st.
 
-One regression: q11 went from rank 1 to 2. Reranking is better on average, not
+One regression: q11 went from rank 1 to 3. Reranking is better on average, not
 uniformly. And 15 questions is a small sample — `recall@20 = 1.00` means "no failures
 in 15 trials", not "recall is 100%".
 
@@ -114,6 +116,5 @@ in 15 trials", not "recall is 100%".
 
 - **Scanned PDFs extract nothing** — pypdf reads text, it is not OCR. Reported per document rather than silently ingested.
 - **Front matter is indexed like content** — a heading-and-header chunk ranked 5th on a real query before reranking demoted it. A text-density filter at ingest would remove it properly.
-- **Chunks begin mid-word** — boundaries are snapped to sentence breaks at the end of a chunk but not at the start. No measured impact on recall, but it is a defect.
 - **Eval is 19 questions on one document family** — enough to catch a regression, not to trust a small difference.
 - **Chunk size is a reasonable default, not a tuned one** — tuning it properly is what the eval harness exists for.
