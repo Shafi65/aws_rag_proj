@@ -9,8 +9,9 @@ one row in the `chunks` table. Size is a real tradeoff --
                   them, matching nothing sharply
 
 Overlap exists so a fact stated across a boundary survives intact in at least
-one chunk. It costs duplicated text: 200/1200 is roughly 17% more chunks, so
-17% more embedding calls, storage, and index size.
+one chunk. It costs duplicated text: 200/1200 is at most roughly 17% more
+chunks, so 17% more embedding calls, storage, and index size. Both ends of a
+chunk snap to clean breaks, so the actual overlap is usually a bit less.
 
 Run directly to preview chunks from a local PDF:
 
@@ -60,6 +61,24 @@ def _snap_to_break(text: str, hard_end: int, earliest: int) -> int:
     return hard_end  # no break found; cut at the hard limit
 
 
+def _snap_start_forward(text: str, earliest: int, end: int) -> int:
+    """Move forward from earliest to the first clean break before end.
+
+    Mirror of _snap_to_break for the *start* of the next chunk. Without it,
+    end - overlap lands on an arbitrary character and every chunk after the
+    first begins mid-sentence. Snapping forward (not back) keeps the overlap
+    at or below `overlap`, so duplication cost never exceeds what was budgeted.
+    """
+    window = text[earliest:end]
+    for marker in BREAK_MARKERS:
+        position = window.find(marker)
+        if position != -1:
+            return earliest + position + len(marker)
+    # No break in the overlap region: start fresh at end. Nothing is lost,
+    # because the previous chunk already ended on a clean break.
+    return end
+
+
 def chunk_text(
     text: str,
     page_starts: list[int],
@@ -106,7 +125,7 @@ def chunk_text(
             break
         # max(..., start + 1) guarantees forward progress even if snapping
         # returned a very short chunk -- otherwise this could loop forever.
-        start = max(end - overlap, start + 1)
+        start = _snap_start_forward(text, max(end - overlap, start + 1), end)
 
     return chunks
 
@@ -140,7 +159,8 @@ if __name__ == "__main__":
         print(f"\n--- chunk {chunk.index} | {pages} | chars {chunk.char_start}-{chunk.char_end} ---")
         print(chunk.text[:400] + ("..." if len(chunk.text) > 400 else ""))
 
-    # Sanity check: consecutive chunks should share `overlap` characters.
+    # Sanity check: consecutive chunks should share at most `overlap` characters,
+    # less when the start snapped forward to a clean break.
     if len(chunks) >= 2:
         shared = chunks[0].char_end - chunks[1].char_start
         print(f"\noverlap between chunks 0 and 1: {shared} chars")
