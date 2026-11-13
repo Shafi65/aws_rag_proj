@@ -20,6 +20,7 @@ cloud" — guest OS, application software, security groups, data, and IAM [1][3]
   [1] wellarchitected-security-pillar.pdf, p. 10
   [2] wellarchitected-reliability-pillar.pdf, p. 9
   [3] wellarchitected-security-pillar.pdf, p. 186
+  ... (sources [4] and [5] trimmed)
 ```
 
 ```
